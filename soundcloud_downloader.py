@@ -77,13 +77,33 @@ def resolve_track(soundcloud_url, client_id, oauth):
 
 def get_hls_transcoding(track_json):
     """
-    From the track JSON, find the transcoding URL that uses HLS (m3u8).
+    From the track JSON, choose an HLS transcoding URL.
+    
+    Prioritize:
+      1. Transcodings with quality "hq" (the high-quality streams).
+      2. Among these, only return normal HLS transcoding, not encrypted HLS.
+      3. If no HQ candidate exists, fall back to any transcoding whose protocol contains "hls".
     """
     transcodings = track_json.get("media", {}).get("transcodings", [])
+    
+    # Filter for candidates with quality HQ and an HLS-based protocol, excluding any encrypted streams
+    hq_candidates = [
+        t for t in transcodings
+        if t.get("quality") == "hq" 
+        and "hls" in t.get("format", {}).get("protocol", "")
+        and "encrypted" not in t.get("format", {}).get("protocol", "")
+    ]
+    
+    if hq_candidates:
+        # Return the first available HQ candidate
+        return hq_candidates[0]["url"]
+    
+    # If no HQ candidates, fallback: Return any non-encrypted transcoding that supports HLS
     for transcoding in transcodings:
-        # Check if the format's protocol is HLS
-        if transcoding.get("format", {}).get("protocol", "") == "hls":
+        protocol = transcoding.get("format", {}).get("protocol", "")
+        if "hls" in protocol and "encrypted" not in protocol:
             return transcoding["url"]
+    
     return None
 
 
