@@ -75,7 +75,7 @@ python soundcloud_downloader.py \
 - `--output`: Output filename (default: output.mp3)
 - `--config`: Path to configuration JSON file (default: config.json)
 - `--client_id`: SoundCloud client ID (optional if provided in config file)
-- `--oauth`: SoundCloud OAuth token (optional if provided in config file, recommended for GO+ users)
+- `--oauth`: SoundCloud OAuth token (optional, recommended for GO+ users)
 
 ## Important Notes
 
