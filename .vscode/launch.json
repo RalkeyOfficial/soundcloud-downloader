@@ -1,0 +1,34 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Python Debugger: Download song with NO GO+",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${workspaceFolder}/soundcloud_downloader.py",
+			"console": "integratedTerminal",
+			"args": [
+				"--url",
+				"https://soundcloud.com/laugui-anthropoly/run-boy-run-woodkid", // this song is a blast
+				"--output",
+				"output.mp3",
+			]
+		},
+		{
+			"name": "Python Debugger: Download song with GO+",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${workspaceFolder}/soundcloud_downloader.py",
+			"console": "integratedTerminal",
+			"args": [
+				"--url",
+				"https://soundcloud.com/woodkid/run-boy-run",
+				"--output",
+				"output.mp3",
+			]
+		}
+	]
+}
