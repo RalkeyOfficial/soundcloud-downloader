@@ -81,6 +81,7 @@ python soundcloud_downloader.py \
 
 - This tool **requires** valid SoundCloud authentication token (client_id and oauth)
 - For GO+ tracks, you need tokens from a GO+ subscription account and add the oauth token.
+- Downloads are in 192Kbps (since 320Kbps is a little lie people tell to advertise their service).
 - No guarantee is provided regarding account safety - use at your own risk
 
 ## Error Handling
