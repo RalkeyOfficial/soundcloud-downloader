@@ -36,10 +36,7 @@ import json
 import sys
 import os
 
-"""
-Check if the right packages are installed before proceeding.
-(i'm not sure if its even possible to not have sys, json, etc installed, but better safe than sorry)
-"""
+
 try:
     subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
 except (subprocess.SubprocessError, FileNotFoundError):
