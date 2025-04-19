@@ -14,7 +14,9 @@
 				"--url",
 				"https://soundcloud.com/laugui-anthropoly/run-boy-run-woodkid", // this song is a blast
 				"--output",
-				"output.mp3",
+				"output",
+				"--codec",
+				"mp3",
 			]
 		},
 		{
@@ -27,7 +29,39 @@
 				"--url",
 				"https://soundcloud.com/woodkid/run-boy-run",
 				"--output",
-				"output.mp3",
+				"output",
+				"--codec",
+				"mp3",
+			]
+		},
+		{
+			"name": "Python Debugger: Download song with GO+ OGG Opus",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${workspaceFolder}/soundcloud_downloader.py",
+			"console": "integratedTerminal",
+			"args": [
+				"--url",
+				"https://soundcloud.com/woodkid/run-boy-run",
+				"--output",
+				"output",
+				"--codec",
+				"opus",
+			]
+		},
+		{
+			"name": "Python Debugger: Download song with GO+ OGG Vorbis",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${workspaceFolder}/soundcloud_downloader.py",
+			"console": "integratedTerminal",
+			"args": [
+				"--url",
+				"https://soundcloud.com/woodkid/run-boy-run",
+				"--output",
+				"output",
+				"--codec",
+				"vorbis",
 			]
 		}
 	]

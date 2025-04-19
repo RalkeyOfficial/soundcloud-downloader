@@ -37,10 +37,14 @@ import sys
 import os
 
 
+VERSION = "1.1.0"
+AUTHOR = "Ralkey"
+
+
 try:
     subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
 except (subprocess.SubprocessError, FileNotFoundError):
-    print("ffmpeg is not installed or not in PATH. Please install it and try again.")
+    print("ffmpeg not found.")
     sys.exit(1)
 
 
@@ -121,7 +125,7 @@ def get_m3u8_url(transcoding_url, client_id, track_authorization, oauth):
     return data["url"]
 
 
-def download_stream_ffmpeg(m3u8_url, output_filename, headers_str):
+def download_stream_ffmpeg(m3u8_url, output_filename, headers_str, codec):
     """
     Invoke ffmpeg to download the HLS stream.
     The provided headers_str is sent with every segment request.
@@ -129,18 +133,63 @@ def download_stream_ffmpeg(m3u8_url, output_filename, headers_str):
     The -c copy option tells ffmpeg to simply copy the audio stream.
     To re-encode to MP3 uncomment/change the options (e.g., "-c:a", "libmp3lame").
     """
+
+    codec_options = {
+        "mp3": {
+            "extension": "mp3",
+            "options": [
+                "-c:a", "libmp3lame",
+                "-b:a", "192k"
+            ]
+        },
+        "opus": {
+            "extension": "ogg",
+            "options": [
+                "-c:a", "libopus",
+                "-b:a", "96k" # audio quality is equivalent to -b:a 192k mp3
+            ]
+        },
+        "vorbis": {
+            "extension": "ogg",
+            "options": [
+                "-c:a", "libvorbis",
+                "-qscale:a", "3" # audio quality is equivalent to -b:a 192k mp3
+            ]
+        },
+        "aac": {
+            "extension": "m4a",
+            "options": [
+                "-c:a", "aac",
+                "-b:a", "192k"
+            ]
+        },
+        "flac": {
+            "extension": "flac",
+            "options": [
+                "-c:a", "flac",
+                "-compression_level", "8"
+            ]
+        },
+        "wav": {
+            "extension": "wav",
+            "options": [
+                "-c:a", "pcm_s16le" # 16-bit PCM
+            ]
+        },
+    }
+    
     cmd = [
         "ffmpeg",
         "-y",
         "-headers", headers_str,
         "-i", m3u8_url,
-        # "-c", "copy",
-        "-c:a", "libmp3lame",
-        "-b:a", "192k",
-        output_filename,
+        *codec_options[codec]["options"],
+        f"{output_filename}.{codec_options[codec]['extension']}"
     ]
+
     print("Running ffmpeg command:")
     print(" ".join(cmd))
+
     result = subprocess.run(cmd)
     if result.returncode != 0:
         print("ffmpeg failed to process the stream.", file=sys.stderr)
@@ -150,10 +199,15 @@ def download_stream_ffmpeg(m3u8_url, output_filename, headers_str):
 def main():
     parser = argparse.ArgumentParser(description="Download a SoundCloud track to MP3 using the HLS stream.")
     parser.add_argument("--url", required=True, help="SoundCloud track URL")
-    parser.add_argument("--output", default="output.mp3", help="Output filename (default: output.mp3)")
     parser.add_argument("--config", default="config.json", help="Path to configuration JSON file with tokens (default: config.json)")
     parser.add_argument("--client_id", help="SoundCloud client ID")
     parser.add_argument("--oauth", help="SoundCloud OAuth token")
+    parser.add_argument("--output", default="output", help="Output filename (default: output)")
+    parser.add_argument("--codec",
+                        default="mp3",
+                        choices=["mp3", "opus", "vorbis", "aac", "flac", "wav"],
+                        help="Audio codec to use (default: mp3)"
+    )
     args = parser.parse_args()
 
     client_id = args.client_id
@@ -217,7 +271,7 @@ def main():
     )
 
     print("Starting download of stream via ffmpeg...")
-    download_stream_ffmpeg(m3u8_url, args.output, ffmpeg_headers)
+    download_stream_ffmpeg(m3u8_url, args.output, ffmpeg_headers, args.codec)
     print("Download completed and saved to", args.output)
 
 
