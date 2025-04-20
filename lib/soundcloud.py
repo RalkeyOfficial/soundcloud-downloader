@@ -188,9 +188,11 @@ async def download_stream_ffmpeg(url, output_filename, output_path, codec, track
         "-y",
         "-headers", ffmpeg_headers,
         "-i", url,
+        "-i", track_json["artwork_url"],
         *codec_options[codec]["options"],
         "-progress", "pipe:1",       # write progress info to stdout
         "-nostats",
+        "-map", "0:a", "-map", "1:v",
         f"{output_path}/{output_filename}.{codec_options[codec]['extension']}"
     ]
 
