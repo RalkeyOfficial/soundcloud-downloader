@@ -29,15 +29,29 @@ and then run:
 This app comes with NO guarantees that you will not get banned from SoundCloud.
 """
 
-import requests
+# if this file is imported, exit
+if __name__ != "__main__":
+    exit()
+
+
 import argparse
 import subprocess
-import json
 import sys
-import os
+import re
+import asyncio
+from rich.markup import escape
+from textual import on
+from textual.app import App, ComposeResult
+from textual.color import Color
+from textual.widgets import Button, Label, Input, ProgressBar, Select
+from textual.containers import Container
+from textual.validation import Regex, Length
+from lib.soundcloud import resolve_track, get_hls_transcoding, get_m3u8_url, download_stream_ffmpeg, get_account_info
+from lib.config import load_config
+from lib.debounce import debounce_async
 
 
-VERSION = "1.1.0"
+VERSION = "2.0.0"
 AUTHOR = "Ralkey"
 
 
@@ -48,232 +62,210 @@ except (subprocess.SubprocessError, FileNotFoundError):
     sys.exit(1)
 
 
-def load_config(config_path):
-    """Load configuration from a JSON file."""
-    if not os.path.exists(config_path):
-        # Create empty config file if it doesn't exist
-        with open(config_path, "w") as f:
-            json.dump({"client_id": "", "oauth": ""}, f)
+# parse args
+parser = argparse.ArgumentParser(description="Download a SoundCloud track to MP3 using the HLS stream.")
+parser.add_argument("--url", help="SoundCloud track URL")
+parser.add_argument("--config", default="config.json", help="Path to configuration JSON file with tokens (default: config.json)")
+parser.add_argument("--client_id", help="SoundCloud client ID")
+parser.add_argument("--oauth", help="SoundCloud OAuth token")
+parser.add_argument("--output", default="output", help="Output filename (default: output)")
+parser.add_argument("--codec",
+                    default="mp3",
+                    choices=["mp3", "opus", "vorbis", "aac", "flac", "wav"],
+                    help="Audio codec to use (default: mp3)"
+)
+args = parser.parse_args()
 
-    with open(config_path, "r") as f:
-        config = json.load(f)
-    return config
+# global variables
+client_id = args.client_id
+oauth = args.oauth
+user_info = {}
 
+# Load configuration tokens from a file if client_id or oauth are not provided.
+config = {}
+if not all([client_id, oauth]):
+    if args.config:
+        config = load_config(args.config)
 
-def resolve_track(soundcloud_url, client_id, oauth):
-    """
-    Resolve the SoundCloud track URL via the SoundCloud API.
-    Returns the track metadata as a JSON object.
-    """
-    resolve_url = "https://api-v2.soundcloud.com/resolve"
-    params = {"url": soundcloud_url, "client_id": client_id}
-    headers = {
-        "Authorization": oauth,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    }
-    response = requests.get(resolve_url, params=params, headers=headers)
-    response.raise_for_status()
-    return response.json()
+# Use command-line tokens or fall back to config file values.
+if not client_id:
+    client_id = config.get("client_id")
+if not oauth:
+    oauth = config.get("oauth")
 
-
-def get_hls_transcoding(track_json):
-    """
-    From the track JSON, choose an HLS transcoding URL.
-    
-    Prioritize:
-      1. Transcodings with quality "hq" (the high-quality streams).
-      2. Among these, only return normal HLS transcoding, not encrypted HLS.
-      3. If no HQ candidate exists, fall back to any transcoding whose protocol contains "hls".
-    """
-    transcodings = track_json.get("media", {}).get("transcodings", [])
-    
-    # Filter for candidates with quality HQ and an HLS-based protocol, excluding any encrypted streams
-    hq_candidates = [
-        t for t in transcodings
-        if t.get("quality") == "hq" 
-        and "hls" in t.get("format", {}).get("protocol", "")
-        and "encrypted" not in t.get("format", {}).get("protocol", "")
-    ]
-    
-    if hq_candidates:
-        # Return the first available HQ candidate
-        return hq_candidates[0]["url"]
-    
-    # If no HQ candidates, fallback: Return any non-encrypted transcoding that supports HLS
-    for transcoding in transcodings:
-        protocol = transcoding.get("format", {}).get("protocol", "")
-        if "hls" in protocol and "encrypted" not in protocol:
-            return transcoding["url"]
-    
-    return None
-
-
-def get_m3u8_url(transcoding_url, client_id, track_authorization, oauth):
-    """
-    Call the transcoding URL endpoint with the necessary client_id and tokens to obtain
-    the actual m3u8 stream URL.
-    """
-    params = {"client_id": client_id, "track_authorization": track_authorization}
-    headers = {
-        "Authorization": oauth,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    }
-    response = requests.get(transcoding_url, params=params, headers=headers)
-    response.raise_for_status()
-    data = response.json()
-    # The API returns a JSON object with a "url" field containing the m3u8 link
-    return data["url"]
-
-
-def download_stream_ffmpeg(m3u8_url, output_filename, headers_str, codec):
-    """
-    Invoke ffmpeg to download the HLS stream.
-    The provided headers_str is sent with every segment request.
-
-    The -c copy option tells ffmpeg to simply copy the audio stream.
-    To re-encode to MP3 uncomment/change the options (e.g., "-c:a", "libmp3lame").
-    """
-
-    codec_options = {
-        "mp3": {
-            "extension": "mp3",
-            "options": [
-                "-c:a", "libmp3lame",
-                "-b:a", "192k"
-            ]
-        },
-        "opus": {
-            "extension": "ogg",
-            "options": [
-                "-c:a", "libopus",
-                "-b:a", "96k" # audio quality is equivalent to -b:a 192k mp3
-            ]
-        },
-        "vorbis": {
-            "extension": "ogg",
-            "options": [
-                "-c:a", "libvorbis",
-                "-qscale:a", "3" # audio quality is equivalent to -b:a 192k mp3
-            ]
-        },
-        "aac": {
-            "extension": "m4a",
-            "options": [
-                "-c:a", "aac",
-                "-b:a", "192k"
-            ]
-        },
-        "flac": {
-            "extension": "flac",
-            "options": [
-                "-c:a", "flac",
-                "-compression_level", "8"
-            ]
-        },
-        "wav": {
-            "extension": "wav",
-            "options": [
-                "-c:a", "pcm_s16le" # 16-bit PCM
-            ]
-        },
-    }
-    
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-headers", headers_str,
-        "-i", m3u8_url,
-        *codec_options[codec]["options"],
-        f"{output_filename}.{codec_options[codec]['extension']}"
-    ]
-
-    print("Running ffmpeg command:")
-    print(" ".join(cmd))
-
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        print("ffmpeg failed to process the stream.", file=sys.stderr)
-        sys.exit(1)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Download a SoundCloud track to MP3 using the HLS stream.")
-    parser.add_argument("--url", required=True, help="SoundCloud track URL")
-    parser.add_argument("--config", default="config.json", help="Path to configuration JSON file with tokens (default: config.json)")
-    parser.add_argument("--client_id", help="SoundCloud client ID")
-    parser.add_argument("--oauth", help="SoundCloud OAuth token")
-    parser.add_argument("--output", default="output", help="Output filename (default: output)")
-    parser.add_argument("--codec",
-                        default="mp3",
-                        choices=["mp3", "opus", "vorbis", "aac", "flac", "wav"],
-                        help="Audio codec to use (default: mp3)"
+# Ensure all necessary tokens are provided.
+if not all([client_id]):
+    print(
+        "Error: client_id must be provided as arguments or in a config file.",
+        file=sys.stderr,
     )
-    args = parser.parse_args()
-
-    client_id = args.client_id
-    oauth = args.oauth
-
-    # Load configuration tokens from a file if client_id or oauth are not provided.
-    config = {}
-    if not all([client_id, oauth]):
-        if args.config:
-            config = load_config(args.config)
-
-    # Use command-line tokens or fall back to config file values.
-    if not client_id:
-        client_id = config.get("client_id")
-    if not oauth:
-        oauth = config.get("oauth")
-
-    # Ensure all necessary tokens are provided.
-    if not all([client_id]):
-        print(
-            "Error: client_id must be provided as arguments or in a config file.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    try:
-        print("Resolving track information...")
-        track_json = resolve_track(args.url, client_id, oauth)
-        track_title = track_json.get("title", "Unknown Title")
-        track_authorization = track_json.get("track_authorization", "")
-        print(f"Track resolved: {track_title}")
-    except Exception as e:
-        print("Failed to resolve track:", e, file=sys.stderr)
-        sys.exit(1)
-
-    # Look for the HLS transcoding URL in the track metadata.
-    transcoding_url = get_hls_transcoding(track_json)
-    if not transcoding_url:
-        print("No HLS transcoding found for this track.", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        print("Fetching m3u8 URL using provided tokens...")
-        m3u8_url = get_m3u8_url(transcoding_url, client_id, track_authorization, oauth)
-        print("m3u8 URL obtained.")
-    except Exception as e:
-        print("Failed to retrieve m3u8 URL:", e, file=sys.stderr)
-        sys.exit(1)
-
-    # Prepare HTTP headers to pass to ffmpeg.
-    # These headers are required to mimic a browser request, similar to the curl commands.
-    ffmpeg_headers = (
-        "Accept: */*\r\n"
-        "Accept-Language: en-US,en;q=0.9,nl-NL;q=0.8,nl;q=0.7\r\n"
-        "Cache-Control: no-cache\r\n"
-        "DNT: 1\r\n"
-        "Origin: https://soundcloud.com\r\n"
-        "Referer: https://soundcloud.com/\r\n"
-        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36\r\n"
-        f"Authorization: {oauth}\r\n"
-    )
-
-    print("Starting download of stream via ffmpeg...")
-    download_stream_ffmpeg(m3u8_url, args.output, ffmpeg_headers, args.codec)
-    print("Download completed and saved to", args.output)
+    sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
+# get user info
+try:
+    user_info = get_account_info(client_id, oauth)
+except Exception as e:
+    user_info["username"] = "Unknown"
+
+
+class SoundCloudDownloaderApp(App):
+    CSS_PATH = "styles/style.tcss"
+
+    def __init__(self):
+        super().__init__()
+        self.track_valid = False
+        self.track_json = {}
+
+    def on_mount(self) -> None:
+        self.screen.styles.border = ("solid", Color(255, 85, 0))
+
+    def compose(self) -> ComposeResult:
+        with Container(id="header_container"):
+            yield Label("SoundCloud HLS Downloader", id="title")
+            yield Label(f"v{VERSION} - By Ralkey", id="subtitle")
+
+        yield Label(f"Logged in as {user_info['username']}", id="user_info", classes=("full_width"))
+
+        with Container(id="input_container"):
+            yield Input(type="text", placeholder="SoundCloud URL", id="url_input", validators=[
+                Regex(regex=r"^https:\/\/soundcloud\.com\/[^/]+/[^/]+$")
+            ])
+            with Container(id="options_container"):
+                yield Input(type="text", placeholder="File name", id="file_name_input", validators=[Length(minimum=1)])
+                yield Select(allow_blank=False, # removes the default blank option
+                    options=(
+                        ("mp3", "mp3"),
+                        ("opus", "opus"),
+                        ("vorbis", "vorbis"),
+                        ("aac", "aac"),
+                        ("flac", "flac"),
+                        ("wav", "wav")
+                    ),
+                    id="codec_select")
+            yield Button("Download", id="download_button", disabled=True, classes=("button_class"))
+
+
+    def update_download_button(self) -> None:
+        download_button = self.query_one("#download_button")
+        download_button.disabled = not self.track_valid
+
+    @on(Input.Changed, "#url_input")
+    async def update_file_name(self, event: Input.Changed) -> None:
+        file_name_input = self.query_one("#file_name_input")
+
+        # reset values to prepare for new fetch
+        self.track_json = {}
+        file_name_input.clear()
+        # mark track as invalid until new data is fetched
+        self.track_valid = False
+        self.update_download_button()
+        
+        await self.fetch_track_info(event=event)
+
+    @debounce_async(delay_seconds=0.5)
+    async def fetch_track_info(self, event):
+        file_name_input = self.query_one("#file_name_input")
+
+        try:
+            self.track_json = resolve_track(event.value, client_id, oauth)
+
+            file_name_input.clear()
+            file_name_input.insert(self.track_json["title"], 0)
+            # Mark track as valid
+            self.track_valid = True
+        except Exception as e:
+            self.track_valid = False
+
+        # update button state
+        self.update_download_button()
+
+
+    @on(Button.Pressed, "#download_button")
+    async def start_download(self, event: Button.Pressed) -> None:
+        input_container = self.query_one("#input_container")
+
+        existing = input_container.query("#progress_bar_container")
+        if existing:
+            # There should be at most one, but just in case:
+            for widget in existing:
+                await widget.remove()
+
+        # mount progress_bar_container
+        await input_container.mount(Container(
+                Label("", id="progress_label"),
+                ProgressBar(name="download_progress", id="progress_bar"),
+                id="progress_bar_container"
+            ))
+
+        progress_label = self.query_one("#progress_label")
+        progress_bar = self.query_one("#progress_bar")
+
+        # Remove invalid Windows filename characters
+        file_name = re.sub(r'[<>:"/\\|?*]', '', self.query_one("#file_name_input").value)
+        # Remove any leading/trailing whitespace and periods
+        file_name = file_name.strip().strip('.')
+        # Use CON, PRN etc. with an underscore to avoid reserved names
+        if file_name.upper() in ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4',
+                                'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 
+                                'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9']:
+            file_name = f"{file_name}_"
+
+        codec = self.query_one("#codec_select").value
+        transcoding = {}
+        m3u8_url = None
+        output_path = "./output"
+
+        # Get the highest quality HLS transcoding URL
+        try:
+            progress_label.update("Getting HLS transcoding URL...")
+            transcoding = get_hls_transcoding(self.track_json, codec)
+            progress_label.update("HLS transcoding URL resolved.")
+        except Exception as e:
+            progress_label.update("No HLS transcoding found for this track.")
+            self.query_one("#progress_bar").remove()
+            await asyncio.sleep(2)
+            self.query_one("#progress_bar_container").remove()
+            return
+        
+        await asyncio.sleep(1)
+
+        # Get the m3u8 URL from the transcoding URL
+        try:
+            progress_label.update("Fetching m3u8 URL...")
+            m3u8_url = get_m3u8_url(transcoding['url'], self.track_json, client_id, oauth)
+            progress_label.update("m3u8 URL obtained.")
+        except Exception as e:
+            progress_label.update("Failed to retrieve m3u8 URL.")
+            self.query_one("#progress_bar").remove()
+            await asyncio.sleep(2)
+            self.query_one("#progress_bar_container").remove()
+            return
+        
+        await asyncio.sleep(1)
+        
+        progress_label.update("Starting download of stream via ffmpeg...")
+        progress_bar.update(total=transcoding["duration"])
+
+        try:
+            async for ms in download_stream_ffmpeg(
+                url=m3u8_url,
+                output_filename=file_name,
+                output_path=output_path,
+                codec=codec,
+                track_json=self.track_json,
+                oauth=oauth
+            ):
+                progress_bar.update(progress=ms // 1000)
+        except Exception as e:
+            safeErr = escape(str(e))
+            progress_label.update(f"[red]Error:[/] {safeErr}")
+            return
+
+        progress_label.update(f"Download completed and saved to {output_path}/{file_name}")
+
+        pass
+
+
+app = SoundCloudDownloaderApp()
+app.run()

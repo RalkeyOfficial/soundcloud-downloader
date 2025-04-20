@@ -1,2 +1,8 @@
 *.mp3
+*.ogg
+*.wav
+*.flac
+*.aac
 config.json
+output/*
+**/__pycache__/*

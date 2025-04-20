@@ -1,0 +1,72 @@
+Screen {
+    padding: 1;
+}
+
+#header_container {
+    width: 100%;
+    align: center middle;
+    padding: 1;
+}
+
+#title {
+    width: 100%;
+    text-style: bold;
+    content-align: center middle;
+}
+
+#subtitle {
+    width: 100%;
+    color: grey;
+    text-style: bold;
+    content-align: center middle;
+}
+
+#user_info {
+    content-align: center middle;
+    padding: 2;
+}
+
+#input_container {
+    layout: grid;
+    grid-size: 2;
+    align: center middle;
+}
+
+#options_container {
+    layout: horizontal;
+    width: 100%;
+}
+#options_container > * {
+    width: 50%;
+}
+
+#progress_bar_container {
+    width: 100%;
+    column-span: 2;
+}
+#progress_label {
+    width: 100%;
+    height: 1;
+    content-align: center middle;
+}
+#progress_bar {
+    width: 100%;
+    height: 1;
+    align: center middle;
+}
+
+#download_button {
+    background: rgb(255, 85, 0);
+    width: 50%;
+}
+
+.button_class {
+    width: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+.full_width {
+    width: 100%;
+    column-span: 2;
+}
