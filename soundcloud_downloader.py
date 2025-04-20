@@ -51,7 +51,7 @@ from lib.config import load_config
 from lib.debounce import debounce_async
 
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 AUTHOR = "Ralkey"
 
 
@@ -258,6 +258,9 @@ class SoundCloudDownloaderApp(App):
             ):
                 progress_bar.update(progress=ms // 1000)
         except Exception as e:
+            # Export error to log file
+            # with open("soundcloud_error.log", "w") as f:
+            #     f.write(f"Error occurred during download:\n{str(e)}")
             safeErr = escape(str(e))
             progress_label.update(f"[red]Error:[/] {safeErr}")
             return

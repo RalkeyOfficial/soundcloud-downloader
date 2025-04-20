@@ -1,7 +1,7 @@
 import requests
 import os
 import asyncio
-
+from lib.vorbis import make_picture_block
 
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
@@ -124,52 +124,7 @@ async def download_stream_ffmpeg(url, output_filename, output_path, codec, track
     To re-encode to MP3 uncomment/change the options (e.g., "-c:a", "libmp3lame").
     """
 
-    codec_options = {
-        "mp3": {
-            "extension": "mp3",
-            "options": [
-                "-c:a", "libmp3lame",
-                "-b:a", "192k"
-            ]
-        },
-        "opus": {
-            "extension": "ogg",
-            "options": [
-                "-c:a", "libopus",
-                "-b:a", "96k" # audio quality is equivalent to -b:a 192k mp3
-            ]
-        },
-        "vorbis": {
-            "extension": "ogg",
-            "options": [
-                "-c:a", "libvorbis",
-                "-qscale:a", "3" # audio quality is equivalent to -b:a 192k mp3
-            ]
-        },
-        "aac": {
-            "extension": "m4a",
-            "options": [
-                "-c:a", "aac",
-                "-b:a", "192k"
-            ]
-        },
-        "flac": {
-            "extension": "flac",
-            "options": [
-                "-c:a", "flac",
-                "-compression_level", "8"
-            ]
-        },
-        "wav": {
-            "extension": "wav",
-            "options": [
-                "-c:a", "pcm_s16le" # 16-bit PCM
-            ]
-        },
-    }
-
-    # Prepare HTTP headers to pass to ffmpeg.
-    # These headers are required to mimic a browser request, similar to curl commands.
+    # Shared headers
     ffmpeg_headers = (
         "Accept: */*\r\n"
         "Accept-Language: en-US,en;q=0.9,nl-NL;q=0.8,nl;q=0.7\r\n"
@@ -180,21 +135,158 @@ async def download_stream_ffmpeg(url, output_filename, output_path, codec, track
         f"User-Agent: {user_agent}\r\n"
         f"Authorization: {oauth}\r\n"
     )
-    
+
+    # Base FFmpeg args
     cmd = [
         "ffmpeg",
         "-hide_banner",
-        "-loglevel", "error", 
+        "-loglevel", "error",
         "-y",
         "-headers", ffmpeg_headers,
-        "-i", url,
-        "-i", track_json["artwork_url"],
-        *codec_options[codec]["options"],
-        "-progress", "pipe:1",       # write progress info to stdout
-        "-nostats",
-        "-map", "0:a", "-map", "1:v",
-        f"{output_path}/{output_filename}.{codec_options[codec]['extension']}"
     ]
+
+    # Some codecs (e.g. opus/vorbis) need extra “security” flags
+    if codec == "opus" or codec == "vorbis":
+        cmd += [
+            "-extension_picky", "0",
+            "-allowed_extensions", "m3u8,m3u,opus,ogg",
+            "-protocol_whitelist", "file,http,https,tcp,tls",
+        ]
+
+    # Always pull in the audio HLS stream
+    cmd += ["-i", url]
+
+    # Now cover‐art/metadata:
+    if codec in ("mp3", "aac", "m4a"):
+        # MP3/MP4‐style embedding: attach image as a second input
+        cmd += ["-i", track_json["artwork_url"], "-c:v", "copy"]
+        # map audio from #0, image from #1
+        cmd += ["-map", "0:a", "-map", "1:v"]
+        # tag it
+        cmd += [
+            "-metadata:s:v", "title=Album cover",
+            "-metadata:s:v", "comment=Cover (front)",
+            "-disposition:v:0", "attached_pic",
+        ]
+    elif codec in ("opus", "vorbis", "flac"):
+        # Vorbis‐comment style: build in‑memory picture block
+        picture_b64 = make_picture_block(track_json["artwork_url"])
+        cmd += [
+            "-metadata:s:a", f"METADATA_BLOCK_PICTURE={picture_b64}"
+        ]
+    # WAV doesn't support cover art natively, so nothing to do there
+
+    # Finally, codec‐specific audio switches:
+    if codec == "mp3":
+        cmd += ["-c:a", "libmp3lame", "-b:a", "192k"]
+    elif codec == "opus":
+        cmd += ["-c:a", "libopus", "-b:a", "96k"]
+    elif codec == "vorbis":
+        cmd += ["-c:a", "libvorbis", "-qscale:a", "3"]
+    elif codec == "aac":
+        cmd += ["-c:a", "aac", "-b:a", "192k"]
+    elif codec == "flac":
+        cmd += ["-c:a", "flac", "-compression_level", "8"]
+    elif codec == "wav":
+        cmd += ["-c:a", "pcm_s16le"]
+
+    # Progress/reporting
+    cmd += ["-progress", "pipe:1", "-nostats"]
+
+    # set output path & filename
+    ext = {
+        "mp3": "mp3",
+        "opus": "ogg",
+        "vorbis": "ogg",
+        "aac": "m4a",
+        "flac": "flac",
+        "wav": "wav",
+    }[codec]
+    cmd.append(f"{output_path}/{output_filename}.{ext}")
+
+    # codec_options = {
+    #     "mp3": {
+    #         "extension": "mp3",
+    #         "options": [
+    #             "-c:a", "libmp3lame",
+    #             "-b:a", "192k"
+    #         ]
+    #     },
+    #     "opus": {
+    #         "extension": "ogg",
+    #         "options": [
+    #             "-c:a", "libopus",
+    #             "-b:a", "96k", # audio quality is equivalent to -b:a 192k mp3
+    #             "-metadata:s:a", "METADATA_BLOCK_PICTURE=\"$BASE64_BLOCK\"",
+    #         ],
+    #         "security_options": [
+    #             "-extension_picky", "0", # disable picky extension checking to allow opus and ogg to work
+    #             "-allowed_extensions", "m3u8,m3u,opus,ogg",  
+    #         ]
+    #     },
+    #     "vorbis": {
+    #         "extension": "ogg",
+    #         "options": [
+    #             "-c:a", "libvorbis",
+    #             "-qscale:a", "3" # audio quality is equivalent to -b:a 192k mp3
+    #         ]
+    #     },
+    #     "aac": {
+    #         "extension": "m4a",
+    #         "options": [
+    #             "-c:a", "aac",
+    #             "-b:a", "192k"
+    #         ]
+    #     },
+    #     "flac": {
+    #         "extension": "flac",
+    #         "options": [
+    #             "-c:a", "flac",
+    #             "-compression_level", "8"
+    #         ]
+    #     },
+    #     "wav": {
+    #         "extension": "wav",
+    #         "options": [
+    #             "-c:a", "pcm_s16le" # 16-bit PCM
+    #         ]
+    #     },
+    # }
+
+    # # Prepare HTTP headers to pass to ffmpeg.
+    # # These headers are required to mimic a browser request, similar to curl commands.
+    # ffmpeg_headers = (
+    #     "Accept: */*\r\n"
+    #     "Accept-Language: en-US,en;q=0.9,nl-NL;q=0.8,nl;q=0.7\r\n"
+    #     "Cache-Control: no-cache\r\n"
+    #     "DNT: 1\r\n"
+    #     "Origin: https://soundcloud.com\r\n"
+    #     "Referer: https://soundcloud.com/\r\n"
+    #     f"User-Agent: {user_agent}\r\n"
+    #     f"Authorization: {oauth}\r\n"
+    # )
+    
+    # cmd = [
+    #     "ffmpeg",
+    #     "-hide_banner",
+    #     "-loglevel", "error",
+    #     "-y",
+    #     "-headers", ffmpeg_headers,
+    #     *(codec_options[codec]["security_options"] if "security_options" in codec_options[codec] else []),
+    #     "-i", url,
+    #     "-i", track_json["artwork_url"],
+    #     # copy the cover art stream instead of re-encoding it:
+    #     "-c:v", "copy",
+    #     *codec_options[codec]["options"],
+    #     # add proper metadata for an attached picture
+    #     "-metadata:s:v", "title=Album cover",
+    #     "-metadata:s:v", "comment=Cover (front)",
+    #     "-disposition:v:0", "attached_pic",
+    #     "-progress", "pipe:1",       # write progress info to stdout
+    #     "-nostats",
+    #     "-map", "0:a", "-map", "1:v",
+    #     f"{output_path}/{output_filename}.{codec_options[codec]['extension']}"
+    # ]
 
     # Create output directory if it doesn't exist
     if not os.path.exists(output_path):
