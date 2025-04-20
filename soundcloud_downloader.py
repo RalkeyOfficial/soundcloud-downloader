@@ -265,6 +265,9 @@ class SoundCloudDownloaderApp(App):
             progress_label.update(f"[red]Error:[/] {safeErr}")
             return
 
+        # due to the difference in the duration of the transcoding and the track, 
+        # we need to update the progress bar to the actual duration of the track so it doesn't show up as unfinished
+        progress_bar.update(total=self.track_json["duration"], progress=self.track_json["duration"])
         progress_label.update(f"Download completed and saved to {output_path}/{file_name}")
 
         pass
