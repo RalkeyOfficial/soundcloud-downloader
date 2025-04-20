@@ -15,7 +15,7 @@ A super simple Python command-line tool for downloading audio tracks from SoundC
 - Python 3.x or newer
 - FFmpeg installed and available in your system PATH
 - Required Python packages:
-  - `requests`, `textual`
+  - `requests`, `textual`, `rich`
 
 ## Installation
 
@@ -29,7 +29,7 @@ A super simple Python command-line tool for downloading audio tracks from SoundC
 
 2. Install the required Python package:
    ```bash
-   pip install requests textual
+   pip install -r requirements.txt
    ```
 
 3. Install FFmpeg:
