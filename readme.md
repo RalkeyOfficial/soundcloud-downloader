@@ -1,6 +1,6 @@
 # SoundCloud HLS Downloader
 
-A super simple Python command-line tool for downloading audio tracks from SoundCloud using HLS (HTTP Live Streaming) protocol. This tool supports both regular and GO+ tracks when provided with appropriate authentication tokens.
+A super simple Python ~~command-line tool~~ TUI for downloading audio tracks from SoundCloud using HLS (HTTP Live Streaming) protocol. This tool supports both regular and GO+ tracks when provided with appropriate authentication tokens.
 
 ## Features
 
@@ -72,10 +72,12 @@ Provide tokens directly when running the script (see Usage section below).
 
 ```bash
 # With config.json in place
-python soundcloud_downloader.py --url "https://soundcloud.com/artist/track-name" --output "song_name"
+python soundcloud_downloader.py
 ```
 
-### Advanced Usage
+### Advanced Usage (CLI)
+
+Note: currently doesn't do anything as the CLI is still to be made
 
 ```bash
 python soundcloud_downloader.py \

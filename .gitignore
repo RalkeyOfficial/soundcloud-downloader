@@ -3,6 +3,6 @@
 *.wav
 *.flac
 *.aac
-config.json
+**/*config*.json
 output/*
 **/__pycache__/*
