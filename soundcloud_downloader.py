@@ -52,7 +52,7 @@ from lib.config import load_config
 from lib.debounce import debounce_async
 
 
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 AUTHOR = "Ralkey"
 
 
@@ -194,7 +194,7 @@ class SoundCloudDownloaderApp(App):
 
     @on(Button.Pressed, "#download_button")
     async def start_download(self, event: Button.Pressed) -> None:
-        input_container = self.query_one("#input_container")
+        input_container = self.query_one("#button_container")
 
         existing = input_container.query("#progress_bar_container")
         if existing:
