@@ -38,6 +38,7 @@ import argparse
 import subprocess
 import sys
 import re
+import os
 import asyncio
 from rich.markup import escape
 from textual import on
@@ -51,7 +52,7 @@ from lib.config import load_config
 from lib.debounce import debounce_async
 
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 AUTHOR = "Ralkey"
 
 
@@ -116,6 +117,7 @@ class SoundCloudDownloaderApp(App):
         super().__init__()
         self.track_valid = False
         self.track_json = {}
+        self.output_path = "./output"
 
     def on_mount(self) -> None:
         self.screen.styles.border = ("solid", Color(255, 85, 0))
@@ -127,23 +129,27 @@ class SoundCloudDownloaderApp(App):
 
         yield Label(f"Logged in as {user_info['username']}", id="user_info", classes=("full_width"))
 
-        with Container(id="input_container"):
-            yield Input(type="text", placeholder="SoundCloud URL", id="url_input", validators=[
-                Regex(regex=r"^https:\/\/soundcloud\.com\/[^/]+/[^/]+$")
-            ])
-            with Container(id="options_container"):
-                yield Input(type="text", placeholder="File name", id="file_name_input", validators=[Length(minimum=1)])
-                yield Select(allow_blank=False, # removes the default blank option
-                    options=(
-                        ("mp3", "mp3"),
-                        ("opus", "opus"),
-                        ("vorbis", "vorbis"),
-                        ("aac", "aac"),
-                        ("flac", "flac"),
-                        ("wav", "wav")
-                    ),
-                    id="codec_select")
-            yield Button("Download", id="download_button", disabled=True, classes=("button_class"))
+        with Container(id="content_container"):
+            with Container(classes=("sub_content_container")): # this container literally just exists to help with centering and limiting the width.
+                with Container(id="input_row"):
+                    yield Input(type="text", placeholder="SoundCloud URL", id="url_input", validators=[
+                        Regex(regex=r"^https:\/\/soundcloud\.com\/[^/]+/[^/]+$")
+                    ])
+                    yield Input(type="text", placeholder="File name", id="file_name_input", validators=[Length(minimum=1)])
+                    yield Select(allow_blank=False, # removes the default blank option
+                        options=(
+                            ("mp3", "mp3"),
+                            ("opus", "opus"),
+                            ("vorbis", "vorbis"),
+                            ("aac", "aac"),
+                            ("flac", "flac"),
+                            ("wav", "wav")
+                        ),
+                        id="codec_select")
+
+                with Container(id="button_container"):
+                    yield Button("Download", id="download_button", disabled=True, classes=("button_class"))
+                    yield Button("Open folder", id="open_folder_button", classes=("button_class"))
 
 
     def update_download_button(self) -> None:
@@ -181,6 +187,11 @@ class SoundCloudDownloaderApp(App):
         self.update_download_button()
 
 
+    @on(Button.Pressed, "#open_folder_button")
+    async def open_folder(self, event: Button.Pressed) -> None:
+        subprocess.run(["explorer", os.path.abspath(self.output_path)], shell=True)
+
+
     @on(Button.Pressed, "#download_button")
     async def start_download(self, event: Button.Pressed) -> None:
         input_container = self.query_one("#input_container")
@@ -214,7 +225,6 @@ class SoundCloudDownloaderApp(App):
         codec = self.query_one("#codec_select").value
         transcoding = {}
         m3u8_url = None
-        output_path = "./output"
 
         # Get the highest quality HLS transcoding URL
         try:
@@ -251,7 +261,7 @@ class SoundCloudDownloaderApp(App):
             async for ms in download_stream_ffmpeg(
                 url=m3u8_url,
                 output_filename=file_name,
-                output_path=output_path,
+                output_path=self.output_path,
                 codec=codec,
                 track_json=self.track_json,
                 oauth=oauth
@@ -268,7 +278,7 @@ class SoundCloudDownloaderApp(App):
         # due to the difference in the duration of the transcoding and the track, 
         # we need to update the progress bar to the actual duration of the track so it doesn't show up as unfinished
         progress_bar.update(total=self.track_json["duration"], progress=self.track_json["duration"])
-        progress_label.update(f"Download completed and saved to {output_path}/{file_name}")
+        progress_label.update(f"Download completed and saved to {self.output_path}/{file_name}")
 
         pass
 

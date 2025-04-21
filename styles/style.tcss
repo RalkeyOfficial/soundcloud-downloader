@@ -1,72 +1,97 @@
 Screen {
-    padding: 1;
+    layout: vertical;
+    align: center top;
+    content-align: center top;
+    padding: 2 2;
 }
 
+/* HEADER */
 #header_container {
-    width: 100%;
+    layout: vertical;
+    padding: 2 0;
+    height: 10;
     align: center middle;
-    padding: 1;
 }
 
 #title {
-    width: 100%;
     text-style: bold;
     content-align: center middle;
+    margin-bottom: 1;
 }
 
 #subtitle {
-    width: 100%;
-    color: grey;
     text-style: bold;
+    color: grey;
     content-align: center middle;
 }
 
+/* USER INFO */
 #user_info {
     content-align: center middle;
-    padding: 2;
-}
-
-#input_container {
-    layout: grid;
-    grid-size: 2;
-    align: center middle;
-}
-
-#options_container {
-    layout: horizontal;
+    margin: 1 0;
     width: 100%;
 }
-#options_container > * {
+
+/* MAIN CONTENT */
+#content_container {
+    layout: vertical;
+    width: 100%;
+    align: center top;
+    content-align: center top;
+}
+.sub_content_container {
+    max-width: 130;
+    height: 10;
+}
+
+/* Input Row */
+#input_row {
+    layout: horizontal;
+    width: 100%;
+    align: center middle;
+    margin: 1 0;
+}
+
+#url_input {
     width: 50%;
 }
 
-#progress_bar_container {
-    width: 100%;
-    column-span: 2;
+#file_name_input,
+#codec_select {
+    width: 25%;
 }
-#progress_label {
+
+/* Button Row */
+#button_container {
+    layout: horizontal;
     width: 100%;
-    height: 1;
-    content-align: center middle;
+    align: left top;
+    margin: 1 0;
 }
-#progress_bar {
-    width: 100%;
-    height: 1;
-    align: center middle;
+
+#download_button,
+#open_folder_button {
+    width: 25%;
+    margin-right: 1;
 }
 
 #download_button {
     background: rgb(255, 85, 0);
-    width: 50%;
 }
 
-.button_class {
+/* Progress (Space Holder) */
+#progress_bar_container {
     width: 100%;
-    padding: 0;
-    margin: 0;
+    margin-top: 1;
+    align: center middle;
 }
 
-.full_width {
+#progress_label {
+    content-align: center middle;
+    height: 1;
+}
+
+#progress_bar {
     width: 100%;
-    column-span: 2;
+    height: 1;
 }
