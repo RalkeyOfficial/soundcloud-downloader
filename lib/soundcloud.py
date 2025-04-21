@@ -1,7 +1,12 @@
 import requests
 import os
+import io
 import asyncio
-from lib.vorbis import make_picture_block
+import tempfile
+from PIL import Image
+from lib.metadata import add_cover_art_from_url
+from lib.events import StageEvent, ProgressEvent, DownloadEvent
+from typing import AsyncIterator
 
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
@@ -115,14 +120,33 @@ def get_m3u8_url(transcoding_url, track_json, client_id, oauth):
     return data["url"]
 
 
-async def download_stream_ffmpeg(url, output_filename, output_path, codec, track_json, oauth):
+async def download_stream_ffmpeg(
+    url: str,
+    output_filename: str,
+    output_path: str,
+    codec: str,
+    track_json: dict,
+    oauth: str
+) -> AsyncIterator[DownloadEvent]:
     """
     Invoke ffmpeg to download the HLS stream.
-    The provided headers_str is sent with every segment request.
-
-    The -c copy option tells ffmpeg to simply copy the audio stream.
-    To re-encode to MP3 uncomment/change the options (e.g., "-c:a", "libmp3lame").
     """
+
+    yield StageEvent("Invoking FFmpeg...")
+
+    ext = {
+        "mp3": "mp3",
+        "opus": "ogg",
+        "vorbis": "ogg",
+        "aac": "m4a",
+        "flac": "flac",
+        "wav": "wav",
+    }[codec]
+
+    artwork_url = track_json["artwork_url"].replace("large", "t500x500")
+    full_output_path = os.path.join(output_path, output_filename + "." + ext)
+    current_progress = 0
+    progress_total = int(track_json["duration"])
 
     # Shared headers
     ffmpeg_headers = (
@@ -145,7 +169,7 @@ async def download_stream_ffmpeg(url, output_filename, output_path, codec, track
         "-headers", ffmpeg_headers,
     ]
 
-    # Some codecs (e.g. opus/vorbis) need extra “security” flags
+    # Some codecs (e.g. opus/vorbis) need extra "security" flags
     if codec == "opus" or codec == "vorbis":
         cmd += [
             "-extension_picky", "0",
@@ -155,26 +179,6 @@ async def download_stream_ffmpeg(url, output_filename, output_path, codec, track
 
     # Always pull in the audio HLS stream
     cmd += ["-i", url]
-
-    # Now cover‐art/metadata:
-    if codec in ("mp3", "aac", "m4a"):
-        # MP3/MP4‐style embedding: attach image as a second input
-        cmd += ["-i", track_json["artwork_url"], "-c:v", "copy"]
-        # map audio from #0, image from #1
-        cmd += ["-map", "0:a", "-map", "1:v"]
-        # tag it
-        cmd += [
-            "-metadata:s:v", "title=Album cover",
-            "-metadata:s:v", "comment=Cover (front)",
-            "-disposition:v:0", "attached_pic",
-        ]
-    elif codec in ("opus", "vorbis", "flac"):
-        # Vorbis‐comment style: build in‑memory picture block
-        picture_b64 = make_picture_block(track_json["artwork_url"])
-        cmd += [
-            "-metadata:s:a", f"METADATA_BLOCK_PICTURE={picture_b64}"
-        ]
-    # WAV doesn't support cover art natively, so nothing to do there
 
     # Finally, codec‐specific audio switches:
     if codec == "mp3":
@@ -194,19 +198,14 @@ async def download_stream_ffmpeg(url, output_filename, output_path, codec, track
     cmd += ["-progress", "pipe:1", "-nostats"]
 
     # set output path & filename
-    ext = {
-        "mp3": "mp3",
-        "opus": "ogg",
-        "vorbis": "ogg",
-        "aac": "m4a",
-        "flac": "flac",
-        "wav": "wav",
-    }[codec]
-    cmd.append(f"{output_path}/{output_filename}.{ext}")
+    cmd.append(full_output_path)
 
     # Create output directory if it doesn't exist
     if not os.path.exists(output_path):
         os.makedirs(output_path)
+
+    yield StageEvent(message="Starting download of stream via ffmpeg...")
+    yield ProgressEvent(total=progress_total)
 
     # spawn ffmpeg under asyncio
     proc = await asyncio.create_subprocess_exec(
@@ -227,11 +226,29 @@ async def download_stream_ffmpeg(url, output_filename, output_path, codec, track
         line = raw.decode().strip()
         if line.startswith("out_time_ms="):
             try:
-                yield int(line.split("=", 1)[1])
+                current_progress = int(line.split("=", 1)[1])
+
+                # if the current progress is greater than the total given by SoundCloud, set the total to the current progress + 1
+                if current_progress >= progress_total:
+                    yield ProgressEvent(progress=current_progress, total=current_progress + 1)
+
+                # yield the progress event
+                yield ProgressEvent(progress=current_progress)
             except ValueError:
                 pass
 
+    # Wait for ffmpeg to finish
     code = await proc.wait()
     if code != 0:
         err = (await proc.stderr.read()).decode()
         raise RuntimeError(f"ffmpeg exited with {code}:\n{err}")
+    
+    # Save the cover art to the audio file after audio file has been made
+    # wav doesn't support cover art
+    if codec not in ("wav"):
+        yield StageEvent(message="Adding cover art to audio file...")
+        await add_cover_art_from_url(full_output_path, artwork_url, codec)
+
+    # finalize the progress bar
+    yield StageEvent(message=f"Download completed and saved to {full_output_path}")
+    yield ProgressEvent(total=current_progress, progress=current_progress+1)

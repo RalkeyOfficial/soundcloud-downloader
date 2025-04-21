@@ -50,7 +50,7 @@ from textual.validation import Regex, Length
 from lib.soundcloud import resolve_track, get_hls_transcoding, get_m3u8_url, download_stream_ffmpeg, get_account_info
 from lib.config import load_config
 from lib.debounce import debounce_async
-
+from lib.events import ProgressEvent, StageEvent
 
 VERSION = "2.1.1"
 AUTHOR = "Ralkey"
@@ -258,7 +258,7 @@ class SoundCloudDownloaderApp(App):
         progress_bar.update(total=transcoding["duration"])
 
         try:
-            async for ms in download_stream_ffmpeg(
+            async for event in download_stream_ffmpeg(
                 url=m3u8_url,
                 output_filename=file_name,
                 output_path=self.output_path,
@@ -266,21 +266,22 @@ class SoundCloudDownloaderApp(App):
                 track_json=self.track_json,
                 oauth=oauth
             ):
-                progress_bar.update(progress=ms // 1000)
+                if isinstance(event, ProgressEvent):
+                    progress_bar.update(progress=event.progress, total=event.total)
+                elif isinstance(event, StageEvent):
+                    progress_label.update(event.message)
         except Exception as e:
             # Export error to log file
-            # with open("soundcloud_error.log", "w") as f:
-            #     f.write(f"Error occurred during download:\n{str(e)}")
-            safeErr = escape(str(e))
-            progress_label.update(f"[red]Error:[/] {safeErr}")
+            with open("soundcloud_error.log", "w") as f:
+                f.write(f"Error occurred during download:\n{str(e)}")
+            # safeErr = escape(str(e))
+            # progress_label.update(f"[red]Error:[/] {safeErr}")
             return
 
         # due to the difference in the duration of the transcoding and the track, 
         # we need to update the progress bar to the actual duration of the track so it doesn't show up as unfinished
         progress_bar.update(total=self.track_json["duration"], progress=self.track_json["duration"])
         progress_label.update(f"Download completed and saved to {self.output_path}/{file_name}")
-
-        pass
 
 
 app = SoundCloudDownloaderApp()
