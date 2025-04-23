@@ -150,13 +150,6 @@ class SoundCloudDownloaderApp(App):
         super().__init__()
         self.track_json = {}
         self.output_path = "./output"
-        # Add validation state tracking
-        self.validation_state = {
-            "url_input": False,
-            "file_name_input": False,
-            "codec_select": False,
-            "track_json": False
-        }
 
     def on_mount(self) -> None:
         self.screen.styles.border = ("solid", Color(255, 85, 0))
@@ -193,20 +186,21 @@ class SoundCloudDownloaderApp(App):
     @on(Input.Changed, "#url_input")
     @on(Input.Changed, "#file_name_input")
     @on(Select.Changed, "#codec_select")
-    def update_validation_state(self, event: Input.Changed | Select.Changed) -> None:
-        # Update the validation state for the changed input
-        if isinstance(event, Input.Changed):
-            widget_id = event.input.id
-            is_valid = event.validation_result.is_valid
-        else:  # Select.Changed
-            widget_id = event.select.id
-            is_valid = True  # Select is always valid when changed since allow_blank=False
-            
-        self.validation_state[widget_id] = is_valid
+    def update_validation_state(self, event: Input.Changed | Select.Changed = None) -> None:
+        url_input = self.query_one("#url_input")
+        file_name_input = self.query_one("#file_name_input")
+        codec_select = self.query_one("#codec_select")
+
+        is_valid = (
+            url_input.validate(url_input.value).is_valid and
+            file_name_input.validate(file_name_input.value).is_valid and
+            codec_select.value is not None
+            and self.track_json is not None
+        )
         
         # Update download button based on all validation states
         download_button = self.query_one("#download_button")
-        download_button.disabled = not all(self.validation_state.values())
+        download_button.disabled = not is_valid
 
     @on(Input.Changed, "#url_input")
     async def update_file_name(self, event: Input.Changed) -> None:
@@ -214,8 +208,10 @@ class SoundCloudDownloaderApp(App):
 
         # reset values to prepare for new fetch
         self.track_json = {}
-        self.validation_state["track_json"] = False  # Reset track_json validation
         file_name_input.clear()
+
+        # update validation state
+        self.update_validation_state()
 
         # if the URL is invalid, don't fetch the track info
         if not event.validation_result.is_valid:
@@ -231,18 +227,10 @@ class SoundCloudDownloaderApp(App):
             self.track_json = resolve_track(event.value, client_id, oauth)
             file_name_input.clear()
             file_name_input.insert(self.track_json["title"], 0)
-
-            # mark track as valid
-            self.validation_state["track_json"] = True
-            # Re-check button state since track_json is now valid
-            self.query_one("#download_button").disabled = not all(self.validation_state.values())
         except Exception as e:
-            # mark track as invalid
-            self.validation_state["track_json"] = False
-            # Set the button to disabled
-            self.query_one("#download_button").disabled = True
-
             log_error(e, context={"track_url": event.value})
+        finally:
+            self.update_validation_state()
 
 
     @on(Button.Pressed, "#open_folder_button")
