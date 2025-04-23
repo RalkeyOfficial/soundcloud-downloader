@@ -53,7 +53,7 @@ from lib.debounce import debounce_async
 from lib.events import ProgressEvent, StageEvent
 from lib.error_handler import log_error, log_info
 
-VERSION = "2.1.1"
+VERSION = "2.1.2"
 AUTHOR = "Ralkey"
 
 log_info(f"Starting SoundCloud Downloader v{VERSION}")
