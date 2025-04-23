@@ -92,7 +92,7 @@ async def add_cover_art_from_url(file_path: str, image_url: str, codec: str):
     # Apply the handler to the audio file
     handler(audio)
     # Save the audio file
-    if isinstance(audio, MP3):
+    if isinstance(audio, MP3) and mime_type == "image/png":
         audio.save(v2_version=4) # save as v2.4 - only v2.4 supports png cover art
     else:
         audio.save()

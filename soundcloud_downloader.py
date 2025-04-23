@@ -51,14 +51,17 @@ from lib.soundcloud import resolve_track, get_hls_transcoding, get_m3u8_url, dow
 from lib.config import load_config
 from lib.debounce import debounce_async
 from lib.events import ProgressEvent, StageEvent
+from lib.error_handler import log_error, log_info
 
 VERSION = "2.1.1"
 AUTHOR = "Ralkey"
 
+log_info(f"Starting SoundCloud Downloader v{VERSION}")
 
 try:
     subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
-except (subprocess.SubprocessError, FileNotFoundError):
+except (subprocess.SubprocessError, FileNotFoundError) as e:
+    log_error(e, context={"error": "ffmpeg not found"})
     print("ffmpeg not found.")
     sys.exit(1)
 
@@ -86,7 +89,10 @@ user_info = {}
 config = {}
 if not all([client_id, oauth]):
     if args.config:
-        config = load_config(args.config)
+        try:
+            config = load_config(args.config)
+        except Exception as e:
+            log_error(e, context={"config_file": args.config})
 
 # Use command-line tokens or fall back to config file values.
 if not client_id:
@@ -107,6 +113,7 @@ if not all([client_id]):
 try:
     user_info = get_account_info(client_id, oauth)
 except Exception as e:
+    log_error(e, context={"error": "Failed to get user account info"})
     user_info["username"] = "Unknown"
 
 
@@ -175,15 +182,13 @@ class SoundCloudDownloaderApp(App):
 
         try:
             self.track_json = resolve_track(event.value, client_id, oauth)
-
             file_name_input.clear()
             file_name_input.insert(self.track_json["title"], 0)
-            # Mark track as valid
             self.track_valid = True
         except Exception as e:
+            log_error(e, context={"track_url": event.value})
             self.track_valid = False
 
-        # update button state
         self.update_download_button()
 
 
@@ -232,7 +237,12 @@ class SoundCloudDownloaderApp(App):
             transcoding = get_hls_transcoding(self.track_json, codec)
             progress_label.update("HLS transcoding URL resolved.")
         except Exception as e:
-            progress_label.update("No HLS transcoding found for this track.")
+            error_msg = "No HLS transcoding found for this track"
+            log_error(e, context={
+                "track_title": self.track_json.get("title"),
+                "codec": codec
+            })
+            progress_label.update(error_msg)
             self.query_one("#progress_bar").remove()
             await asyncio.sleep(2)
             self.query_one("#progress_bar_container").remove()
@@ -246,7 +256,12 @@ class SoundCloudDownloaderApp(App):
             m3u8_url = get_m3u8_url(transcoding['url'], self.track_json, client_id, oauth)
             progress_label.update("m3u8 URL obtained.")
         except Exception as e:
-            progress_label.update("Failed to retrieve m3u8 URL.")
+            error_msg = "Failed to retrieve m3u8 URL"
+            log_error(e, context={
+                "track_title": self.track_json.get("title"),
+                "transcoding_url": transcoding.get('url')
+            })
+            progress_label.update(error_msg)
             self.query_one("#progress_bar").remove()
             await asyncio.sleep(2)
             self.query_one("#progress_bar_container").remove()
@@ -271,11 +286,13 @@ class SoundCloudDownloaderApp(App):
                 elif isinstance(event, StageEvent):
                     progress_label.update(event.message)
         except Exception as e:
-            # Export error to log file
-            with open("soundcloud_error.log", "w") as f:
-                f.write(f"Error occurred during download:\n{str(e)}")
-            # safeErr = escape(str(e))
-            # progress_label.update(f"[red]Error:[/] {safeErr}")
+            safeErr = escape(str(e))
+            error_msg = f"[red]Error:[/] {safeErr}"
+            log_error(e, context={
+                "track_title": self.track_json.get("title"),
+                "output_file": f"{self.output_path}/{file_name}"
+            })
+            progress_label.update(error_msg)
             return
 
         # due to the difference in the duration of the transcoding and the track, 

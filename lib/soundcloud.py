@@ -7,6 +7,7 @@ from PIL import Image
 from lib.metadata import add_cover_art_from_url
 from lib.events import StageEvent, ProgressEvent, DownloadEvent
 from typing import AsyncIterator
+from lib.error_handler import log_error
 
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
@@ -16,21 +17,24 @@ def resolve_track(soundcloud_url, client_id, oauth):
     Resolve the SoundCloud track URL via the SoundCloud API.
     Returns the track metadata as a JSON object.
     """
-    params = {"url": soundcloud_url, "client_id": client_id}
-    headers = {
-        "Authorization": oauth,
-        "User-Agent": user_agent,
-    }
+    try:
+        params = {"url": soundcloud_url, "client_id": client_id}
+        headers = {
+            "Authorization": oauth,
+            "User-Agent": user_agent,
+        }
 
-    response = requests.get("https://api-v2.soundcloud.com/resolve", params=params, headers=headers)
+        response = requests.get("https://api-v2.soundcloud.com/resolve", params=params, headers=headers)
+        response.raise_for_status()
+        
+        json_data = response.json()
+        if "title" not in json_data or "duration" not in json_data:
+            raise ValueError("Track data is missing required fields (title and/or duration)")
 
-    response.raise_for_status()
-    
-    json_data = response.json()
-    if "title" not in json_data or "duration" not in json_data:
-        raise ValueError("Track data is missing required fields (title and/or duration)")
-
-    return json_data
+        return json_data
+    except (requests.exceptions.RequestException, ValueError) as e:
+        log_error(e, context={"track_url": soundcloud_url})
+        raise
 
 
 def get_account_info(client_id, oauth):
@@ -38,15 +42,21 @@ def get_account_info(client_id, oauth):
     Get the account information of the client_id and oauth.
     If oauth is not provided, or invalid, it will return an error.
     """
-    params = {"client_id": client_id}
-    headers = {
-        "Authorization": oauth,
-        "User-Agent": user_agent,
-    }
+    try:
+        params = {"client_id": client_id}
+        headers = {
+            "Authorization": oauth,
+            "User-Agent": user_agent,
+        }
 
-    response = requests.get("https://api-v2.soundcloud.com/me", params=params, headers=headers)
-    response.raise_for_status()
-    return response.json()
+        response = requests.get("https://api-v2.soundcloud.com/me", params=params, headers=headers)
+        response.raise_for_status()
+        
+        user_data = response.json()
+        return user_data
+    except Exception as e:
+        log_error(e, context={"error": "Failed to retrieve account info"})
+        raise
 
 
 
@@ -143,7 +153,10 @@ async def download_stream_ffmpeg(
         "wav": "wav",
     }[codec]
 
-    artwork_url = track_json["artwork_url"].replace("large", "t500x500")
+    artwork_url = track_json.get("artwork_url") or track_json["user"]["avatar_url"]
+    if artwork_url:
+        artwork_url = artwork_url.replace("large", "t500x500")
+
     full_output_path = os.path.join(output_path, output_filename + "." + ext)
     current_progress = 0
     progress_total = int(track_json["duration"])
@@ -226,14 +239,14 @@ async def download_stream_ffmpeg(
         line = raw.decode().strip()
         if line.startswith("out_time_ms="):
             try:
-                current_progress = int(line.split("=", 1)[1])
+                current_progress = int(line.split("=", 1)[1]) // 1000
 
+                # yield the progress event
                 # if the current progress is greater than the total given by SoundCloud, set the total to the current progress + 1
                 if current_progress >= progress_total:
                     yield ProgressEvent(progress=current_progress, total=current_progress + 1)
-
-                # yield the progress event
-                yield ProgressEvent(progress=current_progress)
+                else:
+                    yield ProgressEvent(progress=current_progress)
             except ValueError:
                 pass
 
@@ -243,9 +256,9 @@ async def download_stream_ffmpeg(
         err = (await proc.stderr.read()).decode()
         raise RuntimeError(f"ffmpeg exited with {code}:\n{err}")
     
-    # Save the cover art to the audio file after audio file has been made
+    # Save the cover art to the audio file after audio file has been made if it exists
     # wav doesn't support cover art
-    if codec not in ("wav"):
+    if artwork_url and codec not in ("wav"):
         yield StageEvent(message="Adding cover art to audio file...")
         await add_cover_art_from_url(full_output_path, artwork_url, codec)
 
