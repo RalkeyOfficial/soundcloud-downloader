@@ -2,31 +2,57 @@
 """
 SoundCloud HLS Downloader
 
-This script accepts a SoundCloud track URL, resolves the HLS m3u8 stream URL,
-and downloads the audio to a file (default output.mp3). It supports passing custom
-tokens (client_id and OAuth token) that are necessary for accessing
-protected content (like GO+ tracks).
+A Python-based GUI application for downloading high-quality audio from SoundCloud using HLS streams.
+The app provides a user-friendly interface for downloading tracks and supports various audio formats.
 
-oauth token is optional but highly encouraged, especially if you have a GO+ subscription.
+Key Features:
+- Modern Text-based User Interface (TUI)
+- Multiple audio codec support (mp3, opus, vorbis, aac, flac, wav)
+- High-quality audio downloads via HLS streams
+- GO+ content support with OAuth token
+- Automatic artwork embedding from SoundCloud
+- Progress tracking and error handling
 
 Prerequisites:
 - Python 3.x
-- The "requests" module (install via pip if needed)
 - ffmpeg installed and available on your PATH
+- Required Python packages (install via pip):
+  - requests
+  - textual
+  - rich
+  - mutagen
 
-Usage example:
-    python soundcloud_downloader.py --url "https://soundcloud.com/some-user/some-track" \
-        --output "song.mp3" --client_id YOUR_CLIENT_ID --oauth YOUR_OAUTH_TOKEN
-
-Alternatively, you can supply a JSON config file (e.g., config.json) containing:
+Authentication:
+The app requires a SoundCloud client_id and supports OAuth tokens. These can be provided via config.json:
 {
   "client_id": "YOUR_CLIENT_ID",
-  "oauth": "YOUR_OAUTH_TOKEN",
+  "oauth": "YOUR_OAUTH_TOKEN"  # Optional but highly recommended
 }
-and then run:
-    python soundcloud_downloader.py --url "https://soundcloud.com/some-user/some-track" --config config.json
 
-This app comes with NO guarantees that you will not get banned from SoundCloud.
+Note on OAuth Token:
+While the OAuth token is optional, it is HIGHLY ENCOURAGED to provide one, especially if you:
+- Have a GO+ subscription
+- Need higher quality audio streams
+
+Metadata & Artwork:
+The app automatically:
+- Downloads the track's original artwork from SoundCloud
+- Embeds the artwork as cover image in the audio file
+- Wav does not support artwork embedding
+
+Usage:
+Simply run the script to launch the TUI:
+    python soundcloud_downloader.py
+
+Note: Command-line interface (CLI) support is planned for future releases.
+
+Security Note:
+- Store your tokens securely in config.json
+- Never share your tokens or commit them to version control
+- This app comes with NO guarantees that you will not get banned from SoundCloud
+
+Author: Ralkey
+Version: 2.1.2
 """
 
 # if this file is imported, exit
