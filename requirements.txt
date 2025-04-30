@@ -3,3 +3,4 @@ textual
 rich
 mutagen
 pillow
+standard-imghdr
