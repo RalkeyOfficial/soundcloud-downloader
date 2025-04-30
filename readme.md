@@ -14,8 +14,6 @@ A super simple Python ~~command-line tool~~ TUI for downloading audio tracks fro
 
 - Python 3.x or newer
 - FFmpeg installed and available in your system PATH
-- Required Python packages:
-  - `requests`, `textual`, `rich`
 
 ## Installation
 
