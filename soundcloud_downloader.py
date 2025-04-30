@@ -2,31 +2,57 @@
 """
 SoundCloud HLS Downloader
 
-This script accepts a SoundCloud track URL, resolves the HLS m3u8 stream URL,
-and downloads the audio to a file (default output.mp3). It supports passing custom
-tokens (client_id and OAuth token) that are necessary for accessing
-protected content (like GO+ tracks).
+A Python-based GUI application for downloading high-quality audio from SoundCloud using HLS streams.
+The app provides a user-friendly interface for downloading tracks and supports various audio formats.
 
-oauth token is optional but highly encouraged, especially if you have a GO+ subscription.
+Key Features:
+- Modern Text-based User Interface (TUI)
+- Multiple audio codec support (mp3, opus, vorbis, aac, flac, wav)
+- High-quality audio downloads via HLS streams
+- GO+ content support with OAuth token
+- Automatic artwork embedding from SoundCloud
+- Progress tracking and error handling
 
 Prerequisites:
 - Python 3.x
-- The "requests" module (install via pip if needed)
 - ffmpeg installed and available on your PATH
+- Required Python packages (install via pip):
+  - requests
+  - textual
+  - rich
+  - mutagen
 
-Usage example:
-    python soundcloud_downloader.py --url "https://soundcloud.com/some-user/some-track" \
-        --output "song.mp3" --client_id YOUR_CLIENT_ID --oauth YOUR_OAUTH_TOKEN
-
-Alternatively, you can supply a JSON config file (e.g., config.json) containing:
+Authentication:
+The app requires a SoundCloud client_id and supports OAuth tokens. These can be provided via config.json:
 {
   "client_id": "YOUR_CLIENT_ID",
-  "oauth": "YOUR_OAUTH_TOKEN",
+  "oauth": "YOUR_OAUTH_TOKEN"  # Optional but highly recommended
 }
-and then run:
-    python soundcloud_downloader.py --url "https://soundcloud.com/some-user/some-track" --config config.json
 
-This app comes with NO guarantees that you will not get banned from SoundCloud.
+Note on OAuth Token:
+While the OAuth token is optional, it is HIGHLY ENCOURAGED to provide one, especially if you:
+- Have a GO+ subscription
+- Need higher quality audio streams
+
+Metadata & Artwork:
+The app automatically:
+- Downloads the track's original artwork from SoundCloud
+- Embeds the artwork as cover image in the audio file
+- Wav does not support artwork embedding
+
+Usage:
+Simply run the script to launch the TUI:
+    python soundcloud_downloader.py
+
+Note: Command-line interface (CLI) support is planned for future releases.
+
+Security Note:
+- Store your tokens securely in config.json
+- Never share your tokens or commit them to version control
+- This app comes with NO guarantees that you will not get banned from SoundCloud
+
+Author: Ralkey
+Version: 2.1.2
 """
 
 # if this file is imported, exit
@@ -50,15 +76,18 @@ from textual.validation import Regex, Length
 from lib.soundcloud import resolve_track, get_hls_transcoding, get_m3u8_url, download_stream_ffmpeg, get_account_info
 from lib.config import load_config
 from lib.debounce import debounce_async
+from lib.events import ProgressEvent, StageEvent
+from lib.error_handler import log_error, log_info
 
-
-VERSION = "2.1.1"
+VERSION = "2.1.2"
 AUTHOR = "Ralkey"
 
+log_info(f"Starting SoundCloud Downloader v{VERSION}")
 
 try:
     subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
-except (subprocess.SubprocessError, FileNotFoundError):
+except (subprocess.SubprocessError, FileNotFoundError) as e:
+    log_error(e, context={"error": "ffmpeg not found"})
     print("ffmpeg not found.")
     sys.exit(1)
 
@@ -86,7 +115,10 @@ user_info = {}
 config = {}
 if not all([client_id, oauth]):
     if args.config:
-        config = load_config(args.config)
+        try:
+            config = load_config(args.config)
+        except Exception as e:
+            log_error(e, context={"config_file": args.config})
 
 # Use command-line tokens or fall back to config file values.
 if not client_id:
@@ -107,6 +139,7 @@ if not all([client_id]):
 try:
     user_info = get_account_info(client_id, oauth)
 except Exception as e:
+    log_error(e, context={"error": "Failed to get user account info"})
     user_info["username"] = "Unknown"
 
 
@@ -115,7 +148,6 @@ class SoundCloudDownloaderApp(App):
 
     def __init__(self):
         super().__init__()
-        self.track_valid = False
         self.track_json = {}
         self.output_path = "./output"
 
@@ -151,10 +183,24 @@ class SoundCloudDownloaderApp(App):
                     yield Button("Download", id="download_button", disabled=True, classes=("button_class"))
                     yield Button("Open folder", id="open_folder_button", classes=("button_class"))
 
+    @on(Input.Changed, "#url_input")
+    @on(Input.Changed, "#file_name_input")
+    @on(Select.Changed, "#codec_select")
+    def update_validation_state(self, event: Input.Changed | Select.Changed = None) -> None:
+        url_input = self.query_one("#url_input")
+        file_name_input = self.query_one("#file_name_input")
+        codec_select = self.query_one("#codec_select")
 
-    def update_download_button(self) -> None:
+        is_valid = (
+            url_input.validate(url_input.value).is_valid and
+            file_name_input.validate(file_name_input.value).is_valid and
+            codec_select.value is not None
+            and self.track_json is not None
+        )
+        
+        # Update download button based on all validation states
         download_button = self.query_one("#download_button")
-        download_button.disabled = not self.track_valid
+        download_button.disabled = not is_valid
 
     @on(Input.Changed, "#url_input")
     async def update_file_name(self, event: Input.Changed) -> None:
@@ -163,9 +209,13 @@ class SoundCloudDownloaderApp(App):
         # reset values to prepare for new fetch
         self.track_json = {}
         file_name_input.clear()
-        # mark track as invalid until new data is fetched
-        self.track_valid = False
-        self.update_download_button()
+
+        # update validation state
+        self.update_validation_state()
+
+        # if the URL is invalid, don't fetch the track info
+        if not event.validation_result.is_valid:
+            return
         
         await self.fetch_track_info(event=event)
 
@@ -175,16 +225,12 @@ class SoundCloudDownloaderApp(App):
 
         try:
             self.track_json = resolve_track(event.value, client_id, oauth)
-
             file_name_input.clear()
             file_name_input.insert(self.track_json["title"], 0)
-            # Mark track as valid
-            self.track_valid = True
         except Exception as e:
-            self.track_valid = False
-
-        # update button state
-        self.update_download_button()
+            log_error(e, context={"track_url": event.value})
+        finally:
+            self.update_validation_state()
 
 
     @on(Button.Pressed, "#open_folder_button")
@@ -232,7 +278,12 @@ class SoundCloudDownloaderApp(App):
             transcoding = get_hls_transcoding(self.track_json, codec)
             progress_label.update("HLS transcoding URL resolved.")
         except Exception as e:
-            progress_label.update("No HLS transcoding found for this track.")
+            error_msg = "No HLS transcoding found for this track"
+            log_error(e, context={
+                "track_title": self.track_json.get("title"),
+                "codec": codec
+            })
+            progress_label.update(error_msg)
             self.query_one("#progress_bar").remove()
             await asyncio.sleep(2)
             self.query_one("#progress_bar_container").remove()
@@ -246,7 +297,12 @@ class SoundCloudDownloaderApp(App):
             m3u8_url = get_m3u8_url(transcoding['url'], self.track_json, client_id, oauth)
             progress_label.update("m3u8 URL obtained.")
         except Exception as e:
-            progress_label.update("Failed to retrieve m3u8 URL.")
+            error_msg = "Failed to retrieve m3u8 URL"
+            log_error(e, context={
+                "track_title": self.track_json.get("title"),
+                "transcoding_url": transcoding.get('url')
+            })
+            progress_label.update(error_msg)
             self.query_one("#progress_bar").remove()
             await asyncio.sleep(2)
             self.query_one("#progress_bar_container").remove()
@@ -258,7 +314,7 @@ class SoundCloudDownloaderApp(App):
         progress_bar.update(total=transcoding["duration"])
 
         try:
-            async for ms in download_stream_ffmpeg(
+            async for event in download_stream_ffmpeg(
                 url=m3u8_url,
                 output_filename=file_name,
                 output_path=self.output_path,
@@ -266,21 +322,24 @@ class SoundCloudDownloaderApp(App):
                 track_json=self.track_json,
                 oauth=oauth
             ):
-                progress_bar.update(progress=ms // 1000)
+                if isinstance(event, ProgressEvent):
+                    progress_bar.update(progress=event.progress, total=event.total)
+                elif isinstance(event, StageEvent):
+                    progress_label.update(event.message)
         except Exception as e:
-            # Export error to log file
-            # with open("soundcloud_error.log", "w") as f:
-            #     f.write(f"Error occurred during download:\n{str(e)}")
             safeErr = escape(str(e))
-            progress_label.update(f"[red]Error:[/] {safeErr}")
+            error_msg = f"[red]Error:[/] {safeErr}"
+            log_error(e, context={
+                "track_title": self.track_json.get("title"),
+                "output_file": f"{self.output_path}/{file_name}"
+            })
+            progress_label.update(error_msg)
             return
 
         # due to the difference in the duration of the transcoding and the track, 
         # we need to update the progress bar to the actual duration of the track so it doesn't show up as unfinished
         progress_bar.update(total=self.track_json["duration"], progress=self.track_json["duration"])
         progress_label.update(f"Download completed and saved to {self.output_path}/{file_name}")
-
-        pass
 
 
 app = SoundCloudDownloaderApp()
