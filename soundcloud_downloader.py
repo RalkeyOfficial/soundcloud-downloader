@@ -52,7 +52,7 @@ Security Note:
 - This app comes with NO guarantees that you will not get banned from SoundCloud
 
 Author: Ralkey
-Version: 2.1.2
+Version: 2.1.3
 """
 
 # if this file is imported, exit
@@ -79,7 +79,7 @@ from lib.debounce import debounce_async
 from lib.events import ProgressEvent, StageEvent
 from lib.error_handler import log_error, log_info
 
-VERSION = "2.1.2"
+VERSION = "2.1.3"
 AUTHOR = "Ralkey"
 
 log_info(f"Starting SoundCloud Downloader v{VERSION}")
