@@ -1,5 +1,7 @@
 import requests
 import imghdr
+import io
+from PIL import Image
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggopus import OggOpus
 from mutagen.mp3 import MP3
@@ -7,6 +9,7 @@ from mutagen.id3 import APIC, ID3, error
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
 from lib.vorbis import make_picture_block_from_bytes
+from lib.error_handler import log_warning
 
 def _add_ogg_cover(audio, img_bytes):
     """Add cover art to Ogg Vorbis/Opus files"""
@@ -19,6 +22,13 @@ def _add_mp3_cover(audio, img_bytes, mime_type):
         audio.add_tags()
     except error:
         pass # Tags already exist
+
+    # Check whether the MP3 has ID3 tags and delete all existing APIC frames before adding a new one
+    if audio.tags is not None:
+        try:
+            audio.tags.delall("APIC")
+        except Exception:
+            pass
 
     audio.tags.add(
         APIC(
@@ -73,6 +83,18 @@ async def add_cover_art_from_url(file_path: str, image_url: str, codec: str):
         else:
             raise ValueError("Could not determine image MIME type")
 
+    # Normalize artwork to JPEG because compatibility is a fucking bitch
+    try:
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90, optimize=True)
+        img_bytes = buf.getvalue()
+        mime_type = "image/jpeg"
+    except Exception:
+        # If normalization fails :(
+        log_warning("Failed to normalize cover art to JPEG")
+        pass
+
     # Map codecs to their handlers
     codec_handlers = {
         'opus': (OggOpus, lambda a: _add_ogg_cover(a, img_bytes)),
@@ -92,7 +114,8 @@ async def add_cover_art_from_url(file_path: str, image_url: str, codec: str):
     # Apply the handler to the audio file
     handler(audio)
     # Save the audio file
-    if isinstance(audio, MP3) and mime_type == "image/png":
-        audio.save(v2_version=4) # save as v2.4 - only v2.4 supports png cover art
+    if isinstance(audio, MP3):
+        # Save as ID3v2.3 because compatibility is a fucking bitch. Again.
+        audio.save(v2_version=3)
     else:
         audio.save()

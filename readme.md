@@ -9,6 +9,9 @@ A super simple Python ~~command-line tool~~ TUI for downloading audio tracks fro
 - Token-based authentication
 - Multiple audio codec options
 - Customizable output file naming
+- Audio files actually have cover art as of v2.1.3
+
+> __NOTE:__ `.ogg` files (__Opus__ and __Vorbis__) aren't fully compatible with cover art. You would need to install a Shell extension like `Icaros` or `K-Lite` to render those thumbnails in File Explorer.
 
 ## Prerequisites
 
